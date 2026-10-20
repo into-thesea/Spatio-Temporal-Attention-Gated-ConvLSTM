@@ -46,7 +46,7 @@ STAGC 保留网格建模方式，并在每个 ConvLSTM 单元前加入 STAG 空�
 - 损失：只在有效观测格点上计算的掩码 Huber 损失
 - 输出：未来 12 帧速度图
 
-时间特征支持两种形式：线性编码（时段、星期）和周期编码（sin/cos）。`tanh` 变体使用 tanh 门控，并在解码器中加入未来时间特征和置信度头，作为实验对照。
+时间特征支持两种形式：线性编码（时段、星期）和周期编码（sin/cos）。当前主模型使用周期编码。
 
 ## 图表说明
 
@@ -123,7 +123,6 @@ PeMS-BAY 的对应示例。
 ```
 data_core/data.py              数据加载、时间切分、指标
 models/stagc.py                基础模型
-models/stagc_tanh.py           tanh/置信度变体
 train.py                       训练
 eval.py                        评测
 scripts/prepare_data.py        原始传感器数据 -> 网格张量
