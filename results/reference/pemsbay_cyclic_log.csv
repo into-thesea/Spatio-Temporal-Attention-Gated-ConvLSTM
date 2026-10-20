@@ -1,0 +1,2 @@
+epoch,train_loss,val_mean_mae,val_60min_mae,lr,minutes
+0,0.004296,2.104422,2.593680,0.001,3.63

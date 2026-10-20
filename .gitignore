@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+.idea/
+.vscode/
+.DS_Store
+*.egg-info/
+.venv/
+venv/
+pyenv/
+backups/
+archives/
+
+# Raw and processed data are distributed separately.
+data/*.h5
+data/*.npy
+data/*.zip
+
+# Model weights are distributed via GitHub Releases.
+models/**/*.pth
+models/**/*.onnx
+models/**/*_last.pth
+
+# Keep reference CSV/JSON results, ignore generated plots.
+results/**/*.png
+!assets/*.png
+
+*.pdf
