@@ -48,6 +48,116 @@ STAGC 保留网格建模方式，并在每个 ConvLSTM 单元前加入 STAG 空�
 
 时间特征支持两种形式：线性编码（时段、星期）和周期编码（sin/cos）。当前主模型使用周期编码。
 
+## 门控机制与 STAG 的定位
+
+STAG 不是凭空提出的结构。它和 LSTM、GRU、Highway、GLU、SE-Net 这一类“门控 + 加权”工作有共同思想：用一个可学习的 gate 控制信息保留、放大或抑制。区别主要在**作用维度**和**插入位置**。
+
+### LSTM 与 ConvLSTM
+
+LSTM 用输入门、遗忘门、输出门控制 cell state 的写入、保留和输出：
+
+```text
+i_t = sigmoid(W_i [h_{t-1}, x_t] + b_i)
+f_t = sigmoid(W_f [h_{t-1}, x_t] + b_f)
+o_t = sigmoid(W_o [h_{t-1}, x_t] + b_o)
+c_t = f_t ⊙ c_{t-1} + i_t ⊙ tanh(W_g [h_{t-1}, x_t] + b_g)
+h_t = o_t ⊙ tanh(c_t)
+```
+
+ConvLSTM 把全连接替换成卷积，使门控在 H×W 空间上共享，能够保留网格结构。本项目的 ConvLSTM 单元就是这一形式。
+
+### GRU
+
+GRU（Cho et al., 2014）简化了 LSTM，用更新门和重置门：
+
+```text
+z_t = sigmoid(W_z [h_{t-1}, x_t])
+r_t = sigmoid(W_r [h_{t-1}, x_t])
+h~_t = tanh(W [r_t ⊙ h_{t-1}, x_t])
+h_t = (1 - z_t) ⊙ h_{t-1} + z_t ⊙ h~_t
+```
+
+GRU 的 `(1-z)` 与 `z` 是一种时间维度的残差门控：保留旧隐状态，同时写入新候选状态。DCRNN 的循环部分使用了 GRU 结构。
+
+### Highway Network
+
+Highway Network 用 transform gate `T(x)` 在“变换后的特征”和“原始输入”之间做加权：
+
+```text
+y = H(x) ⊙ T(x) + x ⊙ (1 - T(x))
+```
+
+它和 STAG 的 `x ⊙ (1+g)` 更接近：都保留了原始输入路径，只是 gate 的位置和维度不同。
+
+### GLU 与 SE-Net
+
+GLU（Dauphin et al., 2017）用一路卷积特征去门控另一路：
+
+```text
+GLU(X) = (XW + b) ⊙ sigmoid(XV + c)
+```
+
+SE-Net（Hu et al., 2017）在通道维度做全局池化后生成通道权重：
+
+```text
+s = sigmoid(FC(GAP(X)))
+X' = X ⊙ s
+```
+
+Graph WaveNet 的 temporal convolution 也使用了 gated convolution 的思路。
+
+### STAG 的定位
+
+本项目的 STAG：
+
+```text
+g_t = sigmoid(Conv7x7([x_t, h_{t-1}]))
+x'_t = x_t ⊙ (1 + g_t)
+```
+
+它和上述机制的关系：
+
+- 使用 Sigmoid gate + 逐元素乘法，和 GRU、GLU、SE-Net 一样；
+- 保留原始输入 `x_t`，和 Highway、GRU 的残差思想一致；
+- 但 gate 是一张 16×16 的空间图，不是时间隐状态，也不是通道向量；
+- 它作用在 ConvLSTM 单元之前，用上一时刻隐状态 `h_{t-1}` 判断当前帧哪些空间位置更重要。
+
+因此更准确的说法是：
+
+> STAG 是一个空间维度的输入重校准门控，借鉴了 GRU/Highway 的“门控 + 残差”思想，但不是 GRU 的替代品。
+
+项目中的 Sigmoid 版本满足 `1 + g_t ∈ (1,2)`，因此只会放大输入；仓库中也保留了一个 tanh 门控变体，使用 `x ⊙ (1 + tanh(...))`，使 gate 范围变为 `[0,2]`，可以放大也可以抑制。主模型使用 Sigmoid 版本。
+
+### 对比表
+
+| 机制 | 作用维度 | 位置 | Gate | 主要目的 |
+|---|---|---|---|---|
+| LSTM | 时间 / 隐状态 | 循环单元内部 | Sigmoid / Tanh | 长期记忆 |
+| GRU | 时间 / 隐状态 | 循环单元内部 | Sigmoid / Tanh | 简化记忆更新 |
+| Highway | 层间 | 前馈网络 | Sigmoid | 信息高速公路 |
+| GLU | 特征 / 通道 | 卷积层 | Sigmoid | 特征选择 |
+| SE-Net | 通道 | 卷积块 | Sigmoid | 通道重校准 |
+| STAG | 空间 H×W | ConvLSTM 之前 | Sigmoid | 空间输入重校准 |
+
+## 参考资料
+
+- Hochreiter & Schmidhuber, *Long Short-Term Memory*, 1997
+- Cho et al., *Learning Phrase Representations using RNN Encoder–Decoder for Statistical Machine Translation*, 2014  
+  https://arxiv.org/abs/1406.1078
+- Chung et al., *Empirical Evaluation of Gated Recurrent Neural Networks on Sequence Modeling*, 2014  
+  https://arxiv.org/abs/1412.3555
+- Srivastava et al., *Training Very Deep Networks*, 2015  
+  https://arxiv.org/abs/1507.06228
+- Dauphin et al., *Language Modeling with Gated Convolutional Networks*, 2017  
+  https://arxiv.org/abs/1612.08083
+- Hu et al., *Squeeze-and-Excitation Networks*, 2017  
+  https://arxiv.org/abs/1709.01507
+- Shi et al., *Convolutional LSTM Network*, 2015
+- Li et al., *Diffusion Convolutional Recurrent Neural Network*, 2018  
+  https://arxiv.org/abs/1707.01926
+- Wu et al., *Graph WaveNet for Deep Spatial-Temporal Graph Modeling*, 2019  
+  https://arxiv.org/abs/1906.00121
+
 ## 图表说明
 
 ### 模型结构
